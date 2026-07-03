@@ -22,13 +22,17 @@ def _load_config() -> Dict[str, Any]:
 
 
 def _auth_headers() -> Dict[str, str]:
-    # Re-read config.json on every call so a key saved via the TUI's API tab
-    # takes effect immediately, without restarting this server process.
-    key = _load_config().get("api_key") or os.getenv("NIM_API_KEY")
+    # Re-read config.json on every call so a profile switched/edited via the
+    # TUI's API KEY tab takes effect immediately, without restarting this server.
+    cfg = _load_config()
+    profiles = cfg.get("api_keys") or []
+    active_name = cfg.get("active_profile")
+    active = next((p for p in profiles if p.get("name") == active_name), None)
+    key = (active or {}).get("api_key") or os.getenv("NIM_API_KEY")
     if not key:
         raise ValueError(
-            "No NIM API key found. Set it via the TUI's API tab (config.json), "
-            "or NIM_API_KEY in .env."
+            "No active NIM API key profile found. Create one (and switch to it) via "
+            "the TUI's API KEY tab, or set NIM_API_KEY in .env."
         )
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
@@ -45,7 +49,17 @@ mcp = FastMCP("nim-mcp")
 
     Vision: for VLM models, a message's `content` can be a list of parts instead of a plain
     string, e.g. [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url":
-    "data:image/png;base64,..."}}]. Only models tagged as vision/VLM support this.
+    "data:image/png;base64,..."}}]. Only models tagged as vision/VLM support this -- passing
+    image_url to a text-only model does NOT error, the API silently drops the image and the
+    model hallucinates an answer about it. Verified vision-capable: meta/llama-3.2-11b-vision-instruct,
+    meta/llama-3.2-90b-vision-instruct, microsoft/phi-3-vision-128k-instruct, nvidia/vila,
+    nvidia/neva-22b, nvidia/nemotron-nano-12b-v2-vl. No model on this catalog accepts raw file
+    uploads (PDF/docx/etc) -- extract text client-side and paste it into the message content.
+
+    KNOWN LIMITATION -- z-ai/glm-5.2 (this server's fallback/default model) is TEXT-ONLY. It has
+    no vision variant on this catalog (Zhipu's vision line is the separate GLM-4V family). If a
+    caller needs image input, pick one of the vision-capable models above instead -- do not use
+    glm-5.2 for any task involving image_url content.
 
     Tool calling: pass `tools` (OpenAI-style function schemas) to let the model request tool
     calls. If the response contains tool calls, this returns the raw JSON of `message` (including
