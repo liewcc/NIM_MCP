@@ -4,7 +4,7 @@
 
 # NIM MCP
 
-A Model Context Protocol (MCP) server that wraps the NVIDIA NIM API (build.nvidia.com) to provide chat completions and model discovery, featuring an interactive terminal TUI for API key profile and default model management.
+A Model Context Protocol (MCP) server that wraps the NVIDIA NIM (NVIDIA Inference Microservices) API (build.nvidia.com) to provide chat completions and model discovery, featuring an interactive terminal TUI for API key profile and default model management.
 
 ## Features
 
