@@ -1,4 +1,6 @@
-<img src="logo/logo_clean.png" width="50%">
+<p align="center">
+  <img src="logo/logo_clean.png" width="50%">
+</p>
 
 # NIM MCP
 
@@ -69,7 +71,9 @@ Add the server configuration to your `claude_desktop_config.json` (typically loc
 
 ## TUI Preview
 
-![NIM MCP TUI](screen_shot/1.png)
+<p align="center">
+  <img src="screen_shot/1.png">
+</p>
 
 ## License
 
