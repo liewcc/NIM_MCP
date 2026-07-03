@@ -10,6 +10,7 @@ from mcp.types import TextContent
 load_dotenv()
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CAPABILITIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_capabilities.json")
 FALLBACK_MODEL = "z-ai/glm-5.2"
 
 
@@ -19,6 +20,38 @@ def _load_config() -> Dict[str, Any]:
             return json.load(f)
     except Exception:
         return {}
+
+
+def _load_capabilities() -> Dict[str, Any]:
+    try:
+        with open(CAPABILITIES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+MODEL_CAPS = _load_capabilities()
+
+
+def _infer_caps(model_id: str) -> dict:
+    if model_id in MODEL_CAPS:
+        return MODEL_CAPS[model_id]
+
+    # Fallback naming heuristics
+    if "-vision-" in model_id or "-vl-" in model_id:
+        return {"type": "vlm", "vision": True, "tools": False, "context": None, "notes": "inferred"}
+    elif any(x in model_id for x in ["embed", "bge-", "arctic-embed", "nvclip"]):
+        return {"type": "embed", "vision": False, "tools": False, "context": None, "notes": "inferred"}
+    elif any(x in model_id for x in ["code", "codellama", "starcoder", "codegemma", "codestral"]):
+        return {"type": "code", "vision": False, "tools": False, "context": None, "notes": "inferred"}
+    elif "guard" in model_id or "content-safety" in model_id:
+        return {"type": "safety", "vision": False, "tools": False, "context": None, "notes": "inferred"}
+    elif "parse" in model_id:
+        return {"type": "parse", "vision": False, "tools": False, "context": None, "notes": "inferred"}
+    elif "translate" in model_id:
+        return {"type": "translate", "vision": False, "tools": False, "context": None, "notes": "inferred"}
+    else:
+        return {"type": "chat", "vision": False, "tools": False, "context": None, "notes": "inferred"}
 
 
 def _auth_headers() -> Dict[str, str]:
@@ -42,24 +75,24 @@ client = httpx.Client(base_url="https://integrate.api.nvidia.com/v1", timeout=12
 mcp = FastMCP("nim-mcp")
 
 
+@mcp.tool(description="""Get capability info for a NVIDIA NIM model.
+    Returns JSON with: type (chat/code/embed/vlm/safety/reward/translate/parse/other),
+    vision (bool), tools (bool), context (int or null), notes (str).
+    Use this BEFORE calling chat_completion to verify a model supports your use case.""")
+def get_model_capabilities(model: str) -> TextContent:
+    caps = _infer_caps(model)
+    return TextContent(type="text", text=json.dumps(caps, indent=2))
+
+
 @mcp.tool(
     description="""Generate a chat completion using any model hosted on NVIDIA NIM (build.nvidia.com).
     One API key works for every model in the catalog -- just change the `model` string
     (e.g. "z-ai/glm-5.2", "meta/llama-3.1-405b-instruct", "qwen/qwen3-coder-480b-a35b-instruct").
 
-    Vision: for VLM models, a message's `content` can be a list of parts instead of a plain
-    string, e.g. [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url":
-    "data:image/png;base64,..."}}]. Only models tagged as vision/VLM support this -- passing
-    image_url to a text-only model does NOT error, the API silently drops the image and the
-    model hallucinates an answer about it. Verified vision-capable: meta/llama-3.2-11b-vision-instruct,
-    meta/llama-3.2-90b-vision-instruct, microsoft/phi-3-vision-128k-instruct, nvidia/vila,
-    nvidia/neva-22b, nvidia/nemotron-nano-12b-v2-vl. No model on this catalog accepts raw file
-    uploads (PDF/docx/etc) -- extract text client-side and paste it into the message content.
-
-    KNOWN LIMITATION -- z-ai/glm-5.2 (this server's fallback/default model) is TEXT-ONLY. It has
-    no vision variant on this catalog (Zhipu's vision line is the separate GLM-4V family). If a
-    caller needs image input, pick one of the vision-capable models above instead -- do not use
-    glm-5.2 for any task involving image_url content.
+    Vision/tools: call get_model_capabilities(model) first to check if a model supports
+    vision input (image_url content parts) or tool calling. Not all models support these.
+    Models of type "embed", "safety", "reward", "parse", or "other" do not support chat
+    completion -- use a "chat", "vlm", or "code" model instead.
 
     Tool calling: pass `tools` (OpenAI-style function schemas) to let the model request tool
     calls. If the response contains tool calls, this returns the raw JSON of `message` (including
@@ -96,6 +129,11 @@ def chat_completion(
     # No model specified -- use whatever is currently selected in the TUI's
     # MODELS tab (config.json's default_model), falling back if unset.
     resolved_model = model or _load_config().get("default_model") or FALLBACK_MODEL
+
+    caps = _infer_caps(resolved_model)
+    non_chat = {"embed", "safety", "reward", "parse", "translate", "other"}
+    if caps["type"] in non_chat:
+        return TextContent(type="text", text=f"Error: {resolved_model} is a {caps['type']} model and does not support chat completion. Use a chat, vlm, or code model instead.")
 
     payload = {
         "model": resolved_model,
