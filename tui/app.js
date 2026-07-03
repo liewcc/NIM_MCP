@@ -159,7 +159,7 @@ function ApiKeyPanels({ mode, actionSelected, profiles, profileSelected, activeP
   const keyWidth = Math.max(4, innerWidth - prefixWidth);
   const headerRow = padEndDisplay(' '.repeat(GUTTER) + padEndDisplay('Profile', nameWidth) + ' '.repeat(COL_GAP) + 'API Key', innerWidth);
 
-  const win = windowed(profiles, profileSelected, height - 1); // -1 for the header row
+  const win = windowed(profiles, profileSelected, height - 3); // -1 header row, -2 top+bottom border
 
   return (
     <Box height={height}>
@@ -227,10 +227,10 @@ function ApiKeyForm({ mode, nameDraft, keyDraft, chooseSelected, editing, height
 // Cap rendered rows to the panel's actual height (minus its header line) so a
 // long list can't push the panel taller than the fixed content area; keeps
 // the selected row scrolled into view.
-function windowed(list, selected, rows) {
-  const visible = Math.max(1, rows - 1);
-  const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), Math.max(0, list.length - visible)));
-  return { start, items: list.slice(start, start + visible) };
+function windowed(list, selected, visible) {
+  const n = Math.max(1, visible);
+  const start = Math.max(0, Math.min(selected - Math.floor(n / 2), Math.max(0, list.length - n)));
+  return { start, items: list.slice(start, start + n) };
 }
 
 // ── Models tab — left: owned_by categories (API's own order); right: models
@@ -252,13 +252,18 @@ function ModelsTab({ mode, loading, error, vendors, vendorSelected, vendorModels
     );
   }
 
-  const vendorWin = windowed(vendors, vendorSelected, height);
-  const modelWin = windowed(vendorModels, modelSelected, height);
+  // Visible rows = panel height minus the title row (1) and the top+bottom
+  // border (2). A single-line border box consumes TWO rows vertically, not one;
+  // undercounting it by one made the list overflow the box, which is what caused
+  // both the row overlap ("transparent" title stacking on the first item) and
+  // the one-frame redraw lag.
+  const vendorWin = windowed(vendors, vendorSelected, height - 3);
+  const modelWin = windowed(vendorModels, modelSelected, height - 3);
 
   return (
     <Box height={height}>
       <Box width="35%" height={height} borderStyle="single" borderColor={mode === 'left' ? 'cyan' : 'gray'} paddingX={1} flexDirection="column">
-        <Text dimColor>Vendor (owned_by):</Text>
+        <Text dimColor wrap="truncate-end">Vendor (owned_by):</Text>
         {vendorWin.items.map((v, i) => {
           const idx = vendorWin.start + i;
           const isCursor = mode === 'left' && idx === vendorSelected;
@@ -270,7 +275,7 @@ function ModelsTab({ mode, loading, error, vendors, vendorSelected, vendorModels
         })}
       </Box>
       <Box width="65%" height={height} borderStyle="single" borderColor={mode === 'right' ? 'cyan' : 'gray'} paddingX={1} flexDirection="column">
-        <Text dimColor>Models (A–Z) — Enter sets default_model (★):</Text>
+        <Text dimColor wrap="truncate-end">Model Name</Text>
         {modelWin.items.map((m, i) => {
           const idx = modelWin.start + i;
           const isCursor = mode === 'right' && idx === modelSelected;
@@ -326,8 +331,12 @@ function App() {
   // content) so total output height never changes between renders — a
   // varying height is what causes Ink to leave stale frames behind when
   // switching tabs (the "ghost" duplicate-menu-bar bug). Header (3, bordered),
-  // MenuBar (1) and Footer (1) are each hard-capped, so 5 rows covers them.
-  const mainHeight = Math.max(6, termRows - 5);
+  // MenuBar (1) and Footer (1) take 5 rows; the extra -1 leaves one blank line
+  // at the bottom so total output is termRows-1, NOT the full terminal height.
+  // Filling every row makes the terminal scroll one line when the final row is
+  // written, which knocks Ink's cursor-based in-place redraw out of alignment
+  // and makes the screen lag one keypress behind the real state.
+  const mainHeight = Math.max(6, termRows - 6);
   // Fixed numeric panel widths (not percentage strings) so row strings can be
   // built to an exact character width — same as Gemi's leftPanelWidth/rightPanelWidth.
   const leftPanelWidth = 30;
@@ -372,17 +381,25 @@ function App() {
     setProfileSelected((s) => Math.max(0, Math.min(s, profiles.length - 1)));
   }
 
-  // Fetch the model catalog once, the first time the MODELS tab is opened.
-  // Category = owned_by, kept in the order the API returns it (no re-sorting).
+  // Prefetch the model catalog at mount (not lazily on tab-open), so it's ready
+  // before the user ever navigates to the MODELS tab. Fetching lazily meant the
+  // first arrow press after entering the tab landed on the "Loading…" screen and
+  // appeared to do nothing, forcing a second press. Category = owned_by, kept in
+  // the order the API returns it (no re-sorting).
   useEffect(() => {
-    if (activeTab !== 'models' || models !== null || modelsLoading) return;
+    if (models !== null || modelsLoading) return;
     const cfg = loadConfig();
     const active = (cfg.api_keys || []).find((p) => p.name === cfg.active_profile);
     const key = active && active.api_key;
     if (!key) {
-      setModelsError('No active API key profile — go to the API KEY tab and switch to (or create) one first.');
+      // Only surface the "no key" message once the user is actually on the MODELS
+      // tab; at mount, stay silent so a later profile switch can still prefetch.
+      if (activeTab === 'models') {
+        setModelsError('No active API key profile — go to the API KEY tab and switch to (or create) one first.');
+      }
       return;
     }
+    setModelsError(null);
     setModelsLoading(true);
     fetch('https://integrate.api.nvidia.com/v1/models', { headers: { Authorization: `Bearer ${key}` } })
       .then((res) => {
