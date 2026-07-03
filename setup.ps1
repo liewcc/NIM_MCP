@@ -7,8 +7,19 @@ Write-Host "============================================================" -Foreg
 Write-Host "  NIM MCP -- Setup" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
-# ── 1. Check Python ───────────────────────────────────────────
-Write-Host "`n[1/5] Checking Python..." -ForegroundColor Yellow
+# ── 1. config.json ─────────────────────────────────────────────
+Write-Host "`n[1/6] Config file..." -ForegroundColor Yellow
+$configPath = Join-Path $workDir "config.json"
+if (-not (Test-Path $configPath)) {
+    $defaultConfig = [ordered]@{ default_model = "z-ai/glm-5.2"; active_tab = "api"; api_key = "" }
+    ($defaultConfig | ConvertTo-Json) | Set-Content -Path $configPath -Encoding utf8
+    Write-Host "  Created default config.json." -ForegroundColor Green
+} else {
+    Write-Host "  config.json already exists, leaving it untouched." -ForegroundColor Green
+}
+
+# ── 2. Check Python ───────────────────────────────────────────
+Write-Host "`n[2/6] Checking Python..." -ForegroundColor Yellow
 try {
     $pyVer = & python --version 2>&1
     Write-Host "  Found: $pyVer" -ForegroundColor Green
@@ -18,7 +29,7 @@ try {
 }
 
 # ── 2. Python venv (MCP server deps) ──────────────────────────
-Write-Host "`n[2/5] Python venv (mcp server deps)..." -ForegroundColor Yellow
+Write-Host "`n[3/6] Python venv (mcp server deps)..." -ForegroundColor Yellow
 $venv = Join-Path $workDir ".venv"
 if (-not (Test-Path $venv)) {
     & python -m venv $venv
@@ -28,7 +39,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed"; Read-Host; exit 1 }
 Write-Host "  Done." -ForegroundColor Green
 
 # ── 3. Portable Node.js ───────────────────────────────────────
-Write-Host "`n[3/5] Portable Node.js..." -ForegroundColor Yellow
+Write-Host "`n[4/6] Portable Node.js..." -ForegroundColor Yellow
 $nodeDir = Join-Path $workDir ".node_venv"
 $nodeUrl = "https://nodejs.org/dist/v20.11.1/node-v20.11.1-win-x64.zip"
 $nodeZip = Join-Path $workDir "node-portable.zip"
@@ -59,7 +70,7 @@ $npmVer  = & "$nodeDir\npm.cmd" --version
 Write-Host "  node $nodeVer  /  npm $npmVer" -ForegroundColor Green
 
 # ── 4. npm install (TUI) ──────────────────────────────────────
-Write-Host "`n[4/5] npm install (Ink TUI)..." -ForegroundColor Yellow
+Write-Host "`n[5/6] npm install (Ink TUI)..." -ForegroundColor Yellow
 Push-Location "tui"
 & "$nodeDir\npm.cmd" install
 $npmExit = $LASTEXITCODE
@@ -68,7 +79,7 @@ if ($npmExit -ne 0) { Write-Error "npm install failed"; Read-Host; exit 1 }
 Write-Host "  Done." -ForegroundColor Green
 
 # ── 5. Desktop shortcut ────────────────────────────────────────
-Write-Host "`n[5/5] Creating desktop shortcut..." -ForegroundColor Yellow
+Write-Host "`n[6/6] Creating desktop shortcut..." -ForegroundColor Yellow
 $desktop  = [Environment]::GetFolderPath('Desktop')
 $runPs1   = Join-Path $workDir "run.ps1"
 $iconPath = Join-Path $workDir "logo\logo.ico"

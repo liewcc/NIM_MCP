@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -8,18 +9,31 @@ from mcp.types import TextContent
 
 load_dotenv()
 
-NIM_API_KEY = os.getenv("NIM_API_KEY")
-if not NIM_API_KEY:
-    raise ValueError("NIM_API_KEY environment variable is required")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+FALLBACK_MODEL = "z-ai/glm-5.2"
 
-client = httpx.Client(
-    base_url="https://integrate.api.nvidia.com/v1",
-    headers={
-        "Authorization": f"Bearer {NIM_API_KEY}",
-        "Content-Type": "application/json",
-    },
-    timeout=120.0,
-)
+
+def _load_config() -> Dict[str, Any]:
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _auth_headers() -> Dict[str, str]:
+    # Re-read config.json on every call so a key saved via the TUI's API tab
+    # takes effect immediately, without restarting this server process.
+    key = _load_config().get("api_key") or os.getenv("NIM_API_KEY")
+    if not key:
+        raise ValueError(
+            "No NIM API key found. Set it via the TUI's API tab (config.json), "
+            "or NIM_API_KEY in .env."
+        )
+    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+
+client = httpx.Client(base_url="https://integrate.api.nvidia.com/v1", timeout=120.0)
 
 mcp = FastMCP("nim-mcp")
 
@@ -41,7 +55,8 @@ mcp = FastMCP("nim-mcp")
     Args:
         messages: List of message dicts with 'role' and 'content' keys (content may be a string
             or a list of content parts for vision input)
-        model: NIM model id (see list_models for the full catalog)
+        model: NIM model id (see list_models for the full catalog). If omitted, uses the
+            default_model currently selected in the TUI's MODELS tab (config.json)
         temperature: Sampling temperature
         max_tokens: Maximum tokens to generate
         top_p: Nucleus sampling parameter
@@ -56,7 +71,7 @@ mcp = FastMCP("nim-mcp")
 )
 def chat_completion(
     messages: List[Dict[str, Any]],
-    model: str = "z-ai/glm-5.2",
+    model: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
     top_p: float = 1.0,
@@ -64,8 +79,12 @@ def chat_completion(
     tools: Optional[List[Dict[str, Any]]] = None,
     tool_choice: Optional[Any] = None,
 ) -> TextContent:
+    # No model specified -- use whatever is currently selected in the TUI's
+    # MODELS tab (config.json's default_model), falling back if unset.
+    resolved_model = model or _load_config().get("default_model") or FALLBACK_MODEL
+
     payload = {
-        "model": model,
+        "model": resolved_model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -79,13 +98,12 @@ def chat_completion(
     if tool_choice is not None:
         payload["tool_choice"] = tool_choice
 
-    resp = client.post("/chat/completions", json=payload)
+    resp = client.post("/chat/completions", json=payload, headers=_auth_headers())
     resp.raise_for_status()
     message = resp.json()["choices"][0]["message"]
 
     if message.get("tool_calls"):
-        import json as _json
-        return TextContent(type="text", text=_json.dumps(message))
+        return TextContent(type="text", text=json.dumps(message))
     return TextContent(type="text", text=message["content"])
 
 
@@ -97,7 +115,7 @@ def chat_completion(
     """
 )
 def list_models() -> TextContent:
-    resp = client.get("/models")
+    resp = client.get("/models", headers=_auth_headers())
     resp.raise_for_status()
     models = [m["id"] for m in resp.json().get("data", [])]
     return TextContent(type="text", text="\n".join(sorted(models)))
