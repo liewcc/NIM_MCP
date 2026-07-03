@@ -1,0 +1,8 @@
+.env
+__pycache__/
+.venv/
+.node_venv/
+node-portable.zip
+tui/node_modules/
+tui/dist/
+tui/.tui.lock
